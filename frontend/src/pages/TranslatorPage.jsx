@@ -77,9 +77,13 @@ export default function TranslatorPage() {
 
   // ── Scroll chat to bottom ──
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest"
+      });
+    }
   }, [appState.chatMessages]);
-
   // ── Batch state updates ──
   const updateAppState = useCallback((updates) => {
     setAppState(prev => ({ ...prev, ...updates }));
