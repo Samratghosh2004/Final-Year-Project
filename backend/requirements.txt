@@ -7,3 +7,4 @@ opencv-python==4.7.0.72
 Pillow==9.5.0
 spellchecker==0.6.0
 python-dotenv==1.0.0
+wordfreq

@@ -21,6 +21,7 @@ from io import BytesIO
 from PIL import Image
 import time
 from collections import deque
+from wordfreq import top_n_list
 
 app = Flask(__name__)
 CORS(app)
@@ -33,61 +34,20 @@ DEBUG = os.getenv('DEBUG', 'False').lower() in ('1', 'true', 'yes')
 
 
 # ── Word frequency list for prefix-based suggestions ──────────────────────────
-# A curated set of common English words sorted by approximate frequency.
-# This drives instant prefix completions (e.g. "WAN" → WANT, WANDER, WANT…)
-# without needing an internet call. Add more words here to expand coverage.
-COMMON_WORDS = [
-    # Top 500-ish most common English words, roughly frequency-ordered
-    "the","be","to","of","and","a","in","that","have","it","for","not","on",
-    "with","he","as","you","do","at","this","but","his","by","from","they",
-    "we","say","her","she","or","an","will","my","one","all","would","there",
-    "their","what","so","up","out","if","about","who","get","which","go","me",
-    "when","make","can","like","time","no","just","him","know","take","people",
-    "into","year","your","good","some","could","them","see","other","than","then",
-    "now","look","only","come","its","over","think","also","back","after","use",
-    "two","how","our","work","first","well","way","even","new","want","because",
-    "any","these","give","day","most","us","great","between","need","large","often",
-    "hand","high","place","hold","point","world","still","own","life","few","north",
-    "open","seem","together","next","white","children","begin","got","walk","example",
-    "ease","paper","group","always","music","those","both","mark","book","letter",
-    "until","mile","river","car","feet","care","second","enough","plain","girl","usual",
-    "young","ready","above","ever","red","list","though","feel","talk","bird","soon",
-    "body","dog","family","direct","pose","leave","song","measure","door","product",
-    "black","short","numeral","class","wind","question","happen","complete","ship",
-    "area","half","rock","order","fire","south","problem","piece","told","knew",
-    "pass","since","top","whole","king","space","heard","best","hour","better",
-    "true","during","hundred","five","remember","step","early","hold","west","ground",
-    "interest","reach","fast","verb","sing","listen","six","table","travel","less",
-    "morning","ten","simple","several","vowel","toward","war","lay","against","pattern",
-    "slow","center","love","person","money","serve","appear","road","map","rain","rule",
-    "govern","pull","cold","notice","voice","unit","power","town","fine","drive","plan",
-    "expect","heavy","dance","sing","surprise","behind","along","chance","born","level",
-    "triangle","molecule","select","wrong","gray","repeat","require","broad","prepare",
-    "salt","nose","plural","anger","claim","special","wide","decide","contain","course",
-    # Common W words to test the WAN example
-    "want","wanted","wants","wanting","wander","wanders","wandered","wandering","wane",
-    "waned","wanes","waning","war","ward","warm","warmed","warming","warms","warn",
-    "warned","warning","warns","was","wash","washed","washing","watch","watched",
-    "watching","water","way","we","weak","wealth","wear","weather","week","well",
-    "went","were","what","when","where","which","while","white","who","why","wide",
-    "will","win","wind","wish","with","without","woman","women","wonder","wood",
-    "word","work","world","worry","write","wrote","wrong",
-]
-
+COMMON_WORDS = top_n_list("en", 50000)
 # Build a sorted list of unique lowercase words for binary-search prefix matching
+# _WORD_LIST = sorted(set(w.lower() for w in COMMON_WORDS))
 _WORD_LIST = sorted(set(w.lower() for w in COMMON_WORDS))
 
 def prefix_completions(prefix, limit=6):
-    """
-    Return up to `limit` words from _WORD_LIST that START WITH `prefix`.
-    Uses a simple linear scan (fast enough for a few-hundred-word list).
-    Shorter words come first so the most "basic" completions surface first.
-    """
     prefix = prefix.lower()
-    matches = [w for w in _WORD_LIST if w.startswith(prefix) and w != prefix]
-    matches.sort(key=lambda w: (len(w), w))
-    return matches[:limit]
 
+    matches = [
+        w for w in _WORD_LIST
+        if w.startswith(prefix)
+    ]
+
+    return matches[:limit]
 
 class GestureRecognitionService:
     def __init__(self):
@@ -122,7 +82,7 @@ class GestureRecognitionService:
     def load_models(self):
         """Load Keras models"""
         try:
-            print("🔄 Loading gesture recognition models...")
+            print("Loading gesture recognition models...")
             start_time = time.time()
 
             with open("Models/model_new.json", "r") as f:
@@ -317,7 +277,7 @@ class GestureRecognitionService:
                     if len(self.sentence) > 500:
                         self.sentence = ""
                     self.blank_flag = 0
-                    self.word += current_symbol
+                    self.word += current_symbol.lower()
 
         except Exception as e:
             print(f"Prediction error: {e}")
@@ -582,13 +542,13 @@ if __name__ == '__main__':
     print("\n" + "=" * 60)
     print(" Sign Language Recognition API Server (OPTIMIZED)")
     print("=" * 60)
-    print("✓ Threading enabled for continuous frame capture")
-    print("✓ Letter confirmation threshold: 30 frames (~3s hold)")
-    print("✓ Hybrid suggestion engine: prefix + spell-check")
-    print("✓ Sentence length cap raised to 500 characters")
-    print("✓ Frame compression enabled (JPEG quality 70)")
-    print("✓ Suggestion caching (up to 500 entries)")
-    print(f"✓ Server running at http://{BACKEND_HOST}:{BACKEND_PORT}")
+    print("Threading enabled for continuous frame capture")
+    print("Letter confirmation threshold: 30 frames (~3s hold)")
+    print("Hybrid suggestion engine: prefix + spell-check")
+    print("Sentence length cap raised to 500 characters")
+    print("Frame compression enabled (JPEG quality 70)")
+    print("Suggestion caching (up to 500 entries)")
+    print(f"Server running at http://{BACKEND_HOST}:{BACKEND_PORT}")
     print("=" * 60 + "\n")
 
     app.run(
