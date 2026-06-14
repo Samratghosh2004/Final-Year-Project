@@ -69,10 +69,10 @@ export default function Navbar() {
             </div>
 
             
-            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-600 border border-dark-300 rounded-full text-xs text-gray-300 hover:border-brand-green transition-colors">
+            {/* <button className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-600 border border-dark-300 rounded-full text-xs text-gray-300 hover:border-brand-green transition-colors">
               <Accessibility size={13} />
               <span>Options</span>
-            </button>
+            </button> */}
           </div>
 
           

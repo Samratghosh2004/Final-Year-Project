@@ -104,7 +104,7 @@ export default function HomePage() {
                 <Camera size={16} />
                 Try Live Translator
               </Link>
-              <Link to="/learn" className="btn-outline">
+              <Link to="/tutorial" className="btn-outline">
                 <BookOpen size={16} />
                 Learn Sign Language (Tutorial)
               </Link>
@@ -269,7 +269,7 @@ export default function HomePage() {
               <Camera size={18} />
               Open Live Translator
             </Link>
-            <Link to="/learn" className="btn-outline text-base px-8 py-3">
+            <Link to="/tutorial" className="btn-outline text-base px-8 py-3">
               <BookOpen size={18} />
               Read Quick Tutorial
             </Link>
