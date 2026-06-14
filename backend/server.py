@@ -353,6 +353,8 @@ class GestureRecognitionService:
     def clear_all(self):
         self.word = ""
         self.sentence = ""
+        self.blank_flag = 0     
+        self.current_symbol = "—"
         self.initialize_counters()
 
     def get_state(self):

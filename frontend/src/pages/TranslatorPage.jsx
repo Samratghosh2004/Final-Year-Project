@@ -46,16 +46,16 @@ function useDebounce(value, delay) {
 
 const LANGUAGES = [
   { value: "english", label: "English (no translation)" },
-  { value: "hindi",   label: "Hindi" },
+  { value: "hindi", label: "Hindi" },
   { value: "bengali", label: "Bengali" },
-  { value: "tamil",   label: "Tamil" },
-  { value: "telugu",  label: "Telugu" },
+  { value: "tamil", label: "Tamil" },
+  { value: "telugu", label: "Telugu" },
   { value: "marathi", label: "Marathi" },
-  { value: "gujarati",label: "Gujarati" },
+  { value: "gujarati", label: "Gujarati" },
   { value: "punjabi", label: "Punjabi" },
-  { value: "french",  label: "French" },
+  { value: "french", label: "French" },
   { value: "spanish", label: "Spanish" },
-  { value: "arabic",  label: "Arabic" },
+  { value: "arabic", label: "Arabic" },
 ];
 
 export default function TranslatorPage() {
@@ -285,7 +285,7 @@ export default function TranslatorPage() {
   const stopCamera = useCallback(async () => {
     try {
       await fetch(`${API_BASE_URL}/camera/stop`, { method: "POST" });
-    } catch {}
+    } catch { }
     updateAppState({ cameraActive: false, cameraFrame: null });
     setCameraLoading(false);
   }, [updateAppState]);
@@ -359,16 +359,23 @@ export default function TranslatorPage() {
   }, [manualEdits.localSentence, appState.currentSentence, updateAppState]);
 
   const clearAll = useCallback(async () => {
-    try {
-      await fetch(`${API_BASE_URL}/recognition/clear`, { method: "POST" });
-    } catch {}
+    // Reset local state immediately — don't wait for the API
     setManualEdits({ localWord: "", localSentence: "" });
     updateAppState({
       currentWord: "",
       currentSentence: "",
       currentSymbol: "—",
       suggestions: [],
+      error: "",           
+      cameraFrame: null,   
     });
+
+    // Then try to clear backend state
+    try {
+      await fetch(`${API_BASE_URL}/recognition/clear`, { method: "POST" });
+    } catch (e) {
+      console.error("Reset failed on backend:", e); 
+    }
   }, [updateAppState]);
 
   const acceptSuggestion = useCallback(async (s) => {
@@ -379,7 +386,7 @@ export default function TranslatorPage() {
         localSentence: (prev.localSentence.trim() ? prev.localSentence.trim() + " " : "") + s,
       }));
       updateAppState({ suggestions: [], currentSymbol: "—" });
-      try { await fetch(`${API_BASE_URL}/recognition/clear-word`, { method: "POST" }); } catch {}
+      try { await fetch(`${API_BASE_URL}/recognition/clear-word`, { method: "POST" }); } catch { }
       return;
     }
     try {
@@ -417,7 +424,7 @@ export default function TranslatorPage() {
       : "") + wordToCommit;
     setManualEdits({ localWord: "", localSentence: newSentence });
     updateAppState({ currentSymbol: "—", suggestions: [] });
-    try { await fetch(`${API_BASE_URL}/recognition/clear-word`, { method: "POST" }); } catch {}
+    try { await fetch(`${API_BASE_URL}/recognition/clear-word`, { method: "POST" }); } catch { }
   }, [manualEdits.localWord, manualEdits.localSentence, appState.currentWord, updateAppState]);
 
   const sendToChatHandler = useCallback(async () => {
@@ -481,7 +488,7 @@ export default function TranslatorPage() {
     try {
       await fetch(`${API_BASE_URL}/recognition/send-sentence`, { method: "POST" });
     } catch {
-      fetch(`${API_BASE_URL}/recognition/clear`, { method: "POST" }).catch(() => {});
+      fetch(`${API_BASE_URL}/recognition/clear`, { method: "POST" }).catch(() => { });
     }
   }, [appState, manualEdits, updateAppState]);
 
@@ -533,10 +540,10 @@ export default function TranslatorPage() {
                     {cameraLoading
                       ? "Starting camera…"
                       : !backendReady
-                      ? "Loading models, please wait…"
-                      : appState.cameraActive
-                      ? "Connecting to camera…"
-                      : "Camera inactive"}
+                        ? "Loading models, please wait…"
+                        : appState.cameraActive
+                          ? "Connecting to camera…"
+                          : "Camera inactive"}
                   </p>
                 </div>
               )}
