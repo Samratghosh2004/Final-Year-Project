@@ -286,8 +286,8 @@ class GestureRecognitionService:
             else:
                 self.ct[current_symbol] += 1
 
-            CONFIRM_THRESHOLD = 30
-            FLUCTUATION_TOLERANCE = 15
+            CONFIRM_THRESHOLD = 20
+            FLUCTUATION_TOLERANCE = 10
 
             if self.ct[current_symbol] > CONFIRM_THRESHOLD:
                 for i in ascii_uppercase:
