@@ -1,9 +1,3 @@
-"""
-Flask API Server for Sign Language Recognition - OPTIMIZED
-Connects the gesture recognition model with the frontend React app
-Performance improvements: threading, caching, request throttling
-"""
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
@@ -35,8 +29,6 @@ DEBUG = os.getenv('DEBUG', 'False').lower() in ('1', 'true', 'yes')
 
 # ── Word frequency list for prefix-based suggestions ──────────────────────────
 COMMON_WORDS = top_n_list("en", 50000)
-# Build a sorted list of unique lowercase words for binary-search prefix matching
-# _WORD_LIST = sorted(set(w.lower() for w in COMMON_WORDS))
 _WORD_LIST = sorted(set(w.lower() for w in COMMON_WORDS))
 
 def prefix_completions(prefix, limit=6):
@@ -151,8 +143,35 @@ class GestureRecognitionService:
 
                 cv2.rectangle(frame, (x1 - 1, y1 - 1), (x2 + 1, y2 + 1), (255, 0, 0), 1)
 
+                # roi = frame[y1:y2, x1:x2]
+                # gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                # blur = cv2.GaussianBlur(gray, (5, 5), 2)
+                # th3 = cv2.adaptiveThreshold(
+                #     blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                #     cv2.THRESH_BINARY_INV, 11, 2
+                # )
+                # ret, processed = cv2.threshold(
+                #     th3, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+                # )
                 roi = frame[y1:y2, x1:x2]
-                gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                # Step 1: Detect skin color in YCrCb color space
+                ycrcb = cv2.cvtColor(roi, cv2.COLOR_BGR2YCrCb)
+                skin_mask = cv2.inRange(ycrcb, 
+                    np.array([0, 133, 77]),    # lower skin tone bound
+                    np.array([255, 173, 127])  # upper skin tone bound
+                )
+
+                # Step 2: Clean up the mask (remove noise, fill gaps)
+                kernel = np.ones((3, 3), np.uint8)
+                skin_mask = cv2.dilate(skin_mask, kernel, iterations=2)
+                skin_mask = cv2.erode(skin_mask, kernel, iterations=1)
+                skin_mask = cv2.GaussianBlur(skin_mask, (5, 5), 0)
+
+                # Step 3: Apply mask to keep only skin region
+                skin_only = cv2.bitwise_and(roi, roi, mask=skin_mask)
+
+                # Step 4: Convert to grayscale and threshold (same as before)
+                gray = cv2.cvtColor(skin_only, cv2.COLOR_BGR2GRAY)
                 blur = cv2.GaussianBlur(gray, (5, 5), 2)
                 th3 = cv2.adaptiveThreshold(
                     blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
