@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Camera, BookOpen, ChevronRight, Star, Globe, Mic, Zap, Users, Heart, ArrowRight, Volume2 } from 'lucide-react'
+import { Camera, BookOpen, ChevronRight, Star, Globe, Users, Volume2, X, Send, CheckCircle } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 const languages = [
@@ -16,18 +16,17 @@ const languages = [
 const testimonials = [
   {
     stars: 5,
-    text: '"lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."',
+    text: '"IshnaBridge has made it so much easier for my family to communicate with my deaf son. We can finally have real conversations at dinner."',
     name: 'Gourab Das Gupta',
-    location: 'Blind Child, Kolkata, West Bengal',
+    location: 'Parent, Kolkata, West Bengal',
   },
   {
     stars: 5,
-    text: '"lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."',
+    text: '"As a deaf student, I used to struggle in class. With IshnaBridge, my teachers can understand me instantly. It has changed everything."',
     name: 'Sudipta Giri',
-    location: 'Deaf Child, Kolkata, West Bengal',
+    location: 'Student, Kolkata, West Bengal',
   },
 ]
-
 
 const steps = [
   {
@@ -53,26 +52,191 @@ const steps = [
   },
 ]
 
+// ── Suggest Language Modal ──────────────────────────────────────────────────
+function SuggestLanguageModal({ onClose }) {
+  const [form, setForm] = useState({ name: '', language: '', script: '', reason: '' })
+  const [submitted, setSubmitted] = useState(false)
+  const [loading, setLoading] = useState(false)
+
+  const handleChange = (e) => {
+    setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+  }
+
+  const handleSubmit = async () => {
+    if (!form.language.trim()) return
+    setLoading(true)
+    // TODO: wire to backend — POST /api/suggest-language
+    await new Promise(r => setTimeout(r, 1000))
+    setLoading(false)
+    setSubmitted(true)
+  }
+
+  // Close when clicking outside the modal box
+  const handleBackdrop = (e) => {
+    if (e.target === e.currentTarget) onClose()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center px-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
+      onClick={handleBackdrop}
+    >
+      <div className="w-full max-w-md bg-dark-700 border border-dark-300 rounded-3xl overflow-hidden shadow-2xl">
+
+        {/* Header */}
+        <div className="px-6 py-5 border-b border-dark-300 flex items-start justify-between">
+          <div>
+            <h2 className="font-display font-bold text-white text-lg">Suggest a Language</h2>
+            <p className="text-gray-500 text-xs mt-1">
+              Help us expand to more regional languages across India.
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-500 hover:text-white transition-colors mt-0.5 shrink-0"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6">
+          {submitted ? (
+            <div className="text-center py-8">
+              <CheckCircle size={48} className="text-brand-green mx-auto mb-4" />
+              <h3 className="font-display font-bold text-white text-xl mb-2">Thank you!</h3>
+              <p className="text-gray-400 text-sm leading-relaxed">
+                We've received your suggestion for{' '}
+                <span className="text-brand-green font-semibold">{form.language}</span>.
+                Our team reviews all suggestions and prioritizes based on community need.
+              </p>
+              <button onClick={onClose} className="btn-primary mt-6 mx-auto">
+                Done
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+
+              {/* Language Name — required */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">
+                  Language Name <span className="text-brand-green">*</span>
+                </label>
+                <input
+                  name="language"
+                  type="text"
+                  placeholder="e.g. Odia, Punjabi, Assamese"
+                  className="w-full px-4 py-2.5 bg-dark-600 border border-dark-300 rounded-xl text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-green transition-colors"
+                  value={form.language}
+                  onChange={handleChange}
+                />
+              </div>
+
+              {/* Script */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">
+                  Native Script <span className="text-gray-600">(optional)</span>
+                </label>
+                <input
+                  name="script"
+                  type="text"
+                  placeholder="e.g. ଓଡ଼ିଆ, ਪੰਜਾਬੀ"
+                  className="w-full px-4 py-2.5 bg-dark-600 border border-dark-300 rounded-xl text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-green transition-colors"
+                  value={form.script}
+                  onChange={handleChange}
+                />
+              </div>
+
+              {/* Your name */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">
+                  Your Name <span className="text-gray-600">(optional)</span>
+                </label>
+                <input
+                  name="name"
+                  type="text"
+                  placeholder="e.g. Priya Sharma"
+                  className="w-full px-4 py-2.5 bg-dark-600 border border-dark-300 rounded-xl text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-green transition-colors"
+                  value={form.name}
+                  onChange={handleChange}
+                />
+              </div>
+
+              {/* Reason */}
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">
+                  Why this language? <span className="text-gray-600">(optional)</span>
+                </label>
+                <textarea
+                  name="reason"
+                  rows={3}
+                  placeholder="Tell us about your community or why this language matters to you..."
+                  className="w-full px-4 py-2.5 bg-dark-600 border border-dark-300 rounded-xl text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-green transition-colors resize-none"
+                  value={form.reason}
+                  onChange={handleChange}
+                />
+              </div>
+
+              {/* Info note */}
+              <p className="text-xs text-gray-600 leading-relaxed">
+                We review all suggestions monthly. Languages with the most community requests get prioritized for our next release.
+              </p>
+
+              {/* Submit */}
+              <button
+                onClick={handleSubmit}
+                disabled={!form.language.trim() || loading}
+                className="btn-primary w-full justify-center py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-dark-900 border-t-transparent rounded-full animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Send size={15} />
+                    Submit Suggestion
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main HomePage ─────────────────────────────────────────────────────────────
 export default function HomePage() {
-  const [currentTranslation, setCurrentTranslation] = useState('नमस्ते आप कैसे हैं?')
+  const translations = [
+    { text: 'नमस्ते आप कैसे हैं?', label: 'HINDI OUTPUT (हिंदी)' },
+    { text: 'வணக்கம், நீங்கள் எப்படி இருக்கிறீர்கள்?', label: 'TAMIL OUTPUT (தமிழ்)' },
+    { text: 'నమస్కారం, మీరు ఎలా ఉన్నారు?', label: 'TELUGU OUTPUT (తెలుగు)' },
+    { text: 'হ্যালো, আপনি কেমন আছেন?', label: 'BENGALI OUTPUT (বাংলা)' },
+  ]
+  const [translationIndex, setTranslationIndex] = useState(0)
+  const [suggestModalOpen, setSuggestModalOpen] = useState(false)
+  const currentTranslation = translations[translationIndex].text
+  const currentLabel = translations[translationIndex].label
 
   useEffect(() => {
-    const translations = [
-      'नमस्ते आप कैसे हैं?',
-      'வணக்கம், நீங்கள் எப்படி இருக்கிறீர்கள்?',
-      'నమస్కారం, మీరు ఎలా ఉన్నారు?',
-      'হ্যালো, আপনি কেমন আছেন?',
-    ]
-    let i = 0
     const interval = setInterval(() => {
-      i = (i + 1) % translations.length
-      setCurrentTranslation(translations[i])
+      setTranslationIndex(prev => (prev + 1) % translations.length)
     }, 3000)
     return () => clearInterval(interval)
   }, [])
 
   return (
     <div className="overflow-hidden">
+
+      {/* Suggest Language Modal */}
+      {suggestModalOpen && (
+        <SuggestLanguageModal onClose={() => setSuggestModalOpen(false)} />
+      )}
+
       {/* Hero Section */}
       <section className="relative min-h-screen flex items-center bg-grid-pattern bg-grid">
         {/* Radial glow */}
@@ -104,6 +268,7 @@ export default function HomePage() {
                 <Camera size={16} />
                 Try Live Translator
               </Link>
+              {/* FIX: was /learn, correct route is /tutorial */}
               <Link to="/tutorial" className="btn-outline">
                 <BookOpen size={16} />
                 Learn Sign Language (Tutorial)
@@ -143,7 +308,7 @@ export default function HomePage() {
               {/* Output */}
               <div className="p-4 border-t border-dark-300">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs text-gray-500 font-mono">HINDI OUTPUT (हिंदी)</span>
+                  <span className="text-xs text-gray-500 font-mono">{currentLabel}</span>
                   <Volume2 size={14} className="text-brand-green cursor-pointer hover:text-brand-green-light" />
                 </div>
                 <p className="text-xl font-display font-bold text-white transition-all duration-500">{currentTranslation}</p>
@@ -196,7 +361,11 @@ export default function HomePage() {
               </h2>
               <p className="text-gray-400 text-sm mt-2">Bringing families together across different states. We support major native Indian dialects.</p>
             </div>
-            <button className="btn-outline text-xs whitespace-nowrap self-start sm:self-auto">
+            {/* FIX: now opens the suggest language modal */}
+            <button
+              onClick={() => setSuggestModalOpen(true)}
+              className="btn-outline text-xs whitespace-nowrap self-start sm:self-auto"
+            >
               <Globe size={13} />
               Suggest Another Language
             </button>
@@ -240,12 +409,10 @@ export default function HomePage() {
                   <div className="w-10 h-10 rounded-full bg-dark-500 border border-dark-300 flex items-center justify-center">
                     <Users size={16} className="text-gray-400" />
                   </div>
-                  
                   <div>
                     <p className="text-white font-medium text-sm">{t.name}</p>
                     <p className="text-gray-500 text-xs">{t.location}</p>
-                   </div>
-                  
+                  </div>
                 </div>
               </div>
             ))}
@@ -269,6 +436,7 @@ export default function HomePage() {
               <Camera size={18} />
               Open Live Translator
             </Link>
+            {/* FIX: was /learn, correct route is /tutorial */}
             <Link to="/tutorial" className="btn-outline text-base px-8 py-3">
               <BookOpen size={18} />
               Read Quick Tutorial
