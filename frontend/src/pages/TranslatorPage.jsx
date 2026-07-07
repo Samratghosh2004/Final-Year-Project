@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import "./TranslatorPage.css";
 
-const API_BASE_URL = import.meta?.env?.VITE_API_BASE_URL || "https://final-year-project-vti4.onrender.com/api";
+const API_BASE_URL = import.meta?.env?.VITE_API_BASE_URL || "https://final-year-project-vti4.onrender.com/api/health";
 
 const fontLink = document.createElement("link");
 fontLink.href = "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap";
@@ -198,7 +198,7 @@ export default function TranslatorPage() {
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
-    const MAX_ATTEMPTS = 20; // 20 x 500ms = 10 seconds max wait
+    const MAX_ATTEMPTS = 60; 
 
     const checkHealth = async () => {
       try {
@@ -230,7 +230,7 @@ export default function TranslatorPage() {
     };
 
     checkHealth();
-    healthCheckRef.current = setInterval(checkHealth, 500);
+    healthCheckRef.current = setInterval(checkHealth, 1000);
 
     return () => {
       cancelled = true;
