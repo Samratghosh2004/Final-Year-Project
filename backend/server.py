@@ -108,11 +108,18 @@ class GestureRecognitionService:
             print(f"✗ Error loading models: {e}")
             raise
 
+    # ────────────────────────────────────────────────────────────────────
+    # Legacy server-side webcam methods.
+    # NOTE: these only work on a machine with a physical camera attached
+    # (i.e. running locally). On a cloud host like Render there is no
+    # camera device, so start_camera() will always return an error there.
+    # Kept here for local/dev use; the deployed frontend now uses
+    # process_frame_data() below instead, fed by the browser's own webcam.
+    # ────────────────────────────────────────────────────────────────────
     def start_camera(self):
         if self.is_running:
             return {"status": "warning", "message": "Camera already running"}
 
-        # FIX: prevent double-start while initializing
         if self.camera_initializing:
             return {"status": "warning", "message": "Camera is initializing, please wait..."}
 
@@ -129,7 +136,6 @@ class GestureRecognitionService:
             self.vs.set(cv2.CAP_PROP_FPS, 30)
             self.vs.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-            # FIX: warm-up — read and discard a few frames so camera stabilizes
             print("Warming up camera...")
             for _ in range(5):
                 self.vs.read()
@@ -151,12 +157,11 @@ class GestureRecognitionService:
             return {"status": "error", "message": str(e)}
 
     def _continuous_frame_capture(self):
-        """Background thread — captures frames continuously"""
+        """Background thread — captures frames continuously (local dev only)"""
         while self.is_running:
             try:
                 ok, frame = self.vs.read()
                 if not ok:
-                    # FIX: if frame read fails, wait briefly before retrying
                     time.sleep(0.05)
                     continue
 
@@ -170,29 +175,7 @@ class GestureRecognitionService:
                 cv2.rectangle(frame, (x1 - 1, y1 - 1), (x2 + 1, y2 + 1), (255, 0, 0), 1)
 
                 roi = frame[y1:y2, x1:x2]
-
-                # Skin detection
-                ycrcb = cv2.cvtColor(roi, cv2.COLOR_BGR2YCrCb)
-                skin_mask = cv2.inRange(
-                    ycrcb,
-                    np.array([0, 133, 77]),
-                    np.array([255, 173, 127])
-                )
-                kernel = np.ones((3, 3), np.uint8)
-                skin_mask = cv2.dilate(skin_mask, kernel, iterations=2)
-                skin_mask = cv2.erode(skin_mask, kernel, iterations=1)
-                skin_mask = cv2.GaussianBlur(skin_mask, (5, 5), 0)
-                skin_only = cv2.bitwise_and(roi, roi, mask=skin_mask)
-
-                gray = cv2.cvtColor(skin_only, cv2.COLOR_BGR2GRAY)
-                blur = cv2.GaussianBlur(gray, (5, 5), 2)
-                th3 = cv2.adaptiveThreshold(
-                    blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                    cv2.THRESH_BINARY_INV, 11, 2
-                )
-                ret, processed = cv2.threshold(
-                    th3, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-                )
+                processed = self._process_roi(roi)
 
                 with self.frame_lock:
                     self.current_frame = frame
@@ -202,7 +185,7 @@ class GestureRecognitionService:
 
             except Exception as e:
                 print(f"Error in frame capture thread: {e}")
-                time.sleep(0.05)  # FIX: wait before retrying on error
+                time.sleep(0.05)
                 continue
 
     def stop_camera(self):
@@ -214,7 +197,7 @@ class GestureRecognitionService:
                 self.processing_thread.join(timeout=2)
             if self.vs:
                 self.vs.release()
-                self.vs = None  # FIX: explicitly clear so next start is clean
+                self.vs = None
             with self.frame_lock:
                 self.current_frame = None
                 self.processed_frame = None
@@ -231,6 +214,73 @@ class GestureRecognitionService:
                 self.current_frame.copy(),
                 self.processed_frame.copy() if self.processed_frame is not None else None,
             )
+
+    # ────────────────────────────────────────────────────────────────────
+    # Shared ROI + skin-detection pipeline used by both the legacy
+    # server-side capture loop and the new browser-frame endpoint.
+    # ────────────────────────────────────────────────────────────────────
+    def _process_roi(self, roi):
+        ycrcb = cv2.cvtColor(roi, cv2.COLOR_BGR2YCrCb)
+        skin_mask = cv2.inRange(
+            ycrcb,
+            np.array([0, 133, 77]),
+            np.array([255, 173, 127])
+        )
+        kernel = np.ones((3, 3), np.uint8)
+        skin_mask = cv2.dilate(skin_mask, kernel, iterations=2)
+        skin_mask = cv2.erode(skin_mask, kernel, iterations=1)
+        skin_mask = cv2.GaussianBlur(skin_mask, (5, 5), 0)
+        skin_only = cv2.bitwise_and(roi, roi, mask=skin_mask)
+
+        gray = cv2.cvtColor(skin_only, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (5, 5), 2)
+        th3 = cv2.adaptiveThreshold(
+            blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, 11, 2
+        )
+        _, processed = cv2.threshold(
+            th3, 70, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+        )
+        return processed
+
+    def process_frame_data(self, frame_b64):
+        """
+        NEW: Decode a base64 JPEG sent from the browser's own webcam
+        (via getUserMedia + canvas on the frontend), run it through the
+        same ROI + skin-detection + thresholding pipeline the old
+        cv2.VideoCapture loop used, then predict on it.
+
+        This is what makes gesture recognition work when the backend is
+        deployed to a cloud host (Render, etc.) with no physical camera.
+        """
+        try:
+            if "," in frame_b64:
+                frame_b64 = frame_b64.split(",", 1)[1]
+
+            img_bytes = base64.b64decode(frame_b64)
+            img_array = np.frombuffer(img_bytes, dtype=np.uint8)
+            frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                return {"status": "error", "message": "Could not decode frame"}
+
+            # NOTE: frame from the browser is already mirrored by CSS
+            # (see the video element's transform on the frontend), so we
+            # do NOT flip again here — flipping twice would un-mirror it.
+            x1 = int(0.5 * frame.shape[1])
+            y1 = 10
+            x2 = frame.shape[1] - 10
+            y2 = int(0.5 * frame.shape[0])
+
+            roi = frame[y1:y2, x1:x2]
+            processed = self._process_roi(roi)
+
+            self.predict(processed)
+            return {"status": "success", "data": self.get_state()}
+
+        except Exception as e:
+            print(f"Error processing frame: {e}")
+            return {"status": "error", "message": str(e)}
 
     def predict(self, test_image):
         if test_image is None:
@@ -353,7 +403,7 @@ class GestureRecognitionService:
     def clear_all(self):
         self.word = ""
         self.sentence = ""
-        self.blank_flag = 0     
+        self.blank_flag = 0
         self.current_symbol = "—"
         self.initialize_counters()
 
@@ -363,7 +413,7 @@ class GestureRecognitionService:
             "word": self.word,
             "sentence": self.sentence,
             "is_running": self.is_running,
-            "camera_initializing": self.camera_initializing,  # FIX: expose to frontend
+            "camera_initializing": self.camera_initializing,
             "suggestions": self.get_suggestions(self.word),
         }
 
@@ -381,10 +431,26 @@ def health_check():
         "service": "Sign Language Recognition API",
         "camera_active": service.is_running,
         "camera_initializing": service.camera_initializing,
-        "models_loaded": hasattr(service, 'loaded_model'),  # FIX: tell frontend if models are ready
+        "models_loaded": hasattr(service, 'loaded_model'),
     })
 
 
+# NEW: browser-webcam frame processing — this is what the deployed
+# frontend actually calls now.
+@app.route('/api/recognition/process-frame', methods=['POST'])
+def process_frame():
+    data = request.json
+    frame_b64 = data.get('frame', '') if data else ''
+    if not frame_b64:
+        return jsonify({"status": "error", "message": "No frame provided"}), 400
+    result = service.process_frame_data(frame_b64)
+    return jsonify(result)
+
+
+# ── Legacy server-side webcam routes ──
+# These only succeed on a machine with a physical camera attached
+# (local development). Left in place for local testing; the deployed
+# frontend no longer calls these.
 @app.route('/api/camera/start', methods=['POST'])
 def start_camera():
     result = service.start_camera()
