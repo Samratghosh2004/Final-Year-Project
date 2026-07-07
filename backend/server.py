@@ -18,7 +18,7 @@ from collections import deque
 from wordfreq import top_n_list
 
 app = Flask(__name__)
-CORS(app, origins=["https://agent-6a4c00236f72d6a2a57--profound-gnome-2bcdd2.netlify.app"])
+CORS(app, origins=["https://ishnabridge.netlify.app"])
 
 load_dotenv()
 
