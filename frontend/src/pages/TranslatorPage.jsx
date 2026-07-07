@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import "./TranslatorPage.css";
 
-const API_BASE_URL = import.meta?.env?.VITE_API_BASE_URL || "http://localhost:5000/api";
+const API_BASE_URL = import.meta?.env?.VITE_API_BASE_URL || "https://final-year-project-vti4.onrender.com/api";
 
 const fontLink = document.createElement("link");
 fontLink.href = "https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap";
