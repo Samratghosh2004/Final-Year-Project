@@ -73,10 +73,9 @@ export default function TranslatorPage() {
     chatMessages: [],
   });
 
-  // FIX: separate loading state so button shows spinner while starting
   const [cameraLoading, setCameraLoading] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("connecting");
-  const [backendReady, setBackendReady] = useState(false); // FIX: track backend readiness
+  const [backendReady, setBackendReady] = useState(false);
 
   const [manualEdits, setManualEdits] = useState({
     localWord: "",
@@ -87,11 +86,11 @@ export default function TranslatorPage() {
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
   const frameIntervalRef = useRef(null);
-  const recIntervalRef = useRef(null);
   const chatEndRef = useRef(null);
   const retryCountRef = useRef(0);
-  const maxRetriesRef = useRef(5); // FIX: increased retries
-  const healthCheckRef = useRef(null); // FIX: health check interval ref
+  const maxRetriesRef = useRef(5);
+  const healthCheckRef = useRef(null);
+  const frameProcessingRef = useRef(false); // FIX: prevent frame queue buildup
 
   const activeWord = manualEdits.localWord !== "" ? manualEdits.localWord : appState.currentWord;
   const debouncedActiveWord = useDebounce(activeWord, 250);
@@ -106,12 +105,11 @@ export default function TranslatorPage() {
     setAppState(prev => ({ ...prev, ...updates }));
   }, []);
 
-  // ── FIX: Health check FIRST before auto-starting camera ──
-  // Poll /health until backend says models_loaded=true, THEN start camera
+  // ── FIX: Health check with proper cleanup ──
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
-    const MAX_ATTEMPTS = 20; // 20 x 500ms = 10 seconds max wait
+    const MAX_ATTEMPTS = 20;
 
     const checkHealth = async () => {
       try {
@@ -123,13 +121,12 @@ export default function TranslatorPage() {
         if (data.status === "ok" && data.models_loaded) {
           setBackendReady(true);
           setConnectionStatus("connected");
-          clearInterval(healthCheckRef.current);
-          // Auto-start camera only after backend confirmed ready
+          if (healthCheckRef.current) clearInterval(healthCheckRef.current);
           startCamera();
         } else {
           attempts++;
           if (attempts >= MAX_ATTEMPTS) {
-            clearInterval(healthCheckRef.current);
+            if (healthCheckRef.current) clearInterval(healthCheckRef.current);
             updateAppState({ error: "Backend took too long to load models. Refresh the page." });
             setConnectionStatus("disconnected");
           }
@@ -137,25 +134,27 @@ export default function TranslatorPage() {
       } catch (e) {
         attempts++;
         if (attempts >= MAX_ATTEMPTS) {
-          clearInterval(healthCheckRef.current);
+          if (healthCheckRef.current) clearInterval(healthCheckRef.current);
           updateAppState({ error: "Cannot reach backend. Is the server running?" });
           setConnectionStatus("disconnected");
         }
       }
     };
 
-    // Check immediately, then every 500ms
     checkHealth();
     healthCheckRef.current = setInterval(checkHealth, 500);
 
     return () => {
       cancelled = true;
-      clearInterval(healthCheckRef.current);
+      if (healthCheckRef.current) {
+        clearInterval(healthCheckRef.current);
+        healthCheckRef.current = null;
+      }
       stopCamera();
     };
-  }, []); // runs once on mount
+  }, []);
 
-  // ── Suggestions ──
+  // ── Suggestions with previous word tracking ──
   useEffect(() => {
     const word = debouncedActiveWord?.trim();
     if (!word) {
@@ -176,52 +175,78 @@ export default function TranslatorPage() {
     fetchSuggestions();
   }, [debouncedActiveWord, updateAppState]);
 
-  // ── Send browser frame to backend for processing ──
+  // ── Send frame with queue protection ──
   const sendFrameToBackend = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current || !appState.cameraActive) return;
     
+    // FIX: Skip if already processing a frame
+    if (frameProcessingRef.current) return;
+    frameProcessingRef.current = true;
+
     try {
       const ctx = canvasRef.current.getContext("2d");
-      if (!ctx) return;
+      if (!ctx) {
+        frameProcessingRef.current = false;
+        return;
+      }
 
-      // Draw video to canvas (mirrored for selfie view)
       ctx.save();
       ctx.scale(-1, 1);
       ctx.drawImage(videoRef.current, -canvasRef.current.width, 0, canvasRef.current.width, canvasRef.current.height);
       ctx.restore();
 
-      // Convert to base64 JPEG
-      canvasRef.current.toBlob((blob) => {
-        if (!blob) return;
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          const frameB64 = e.target.result;
-          try {
-            const res = await fetch(`${API_BASE_URL}/recognition/process-frame`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ frame: frameB64 }),
+      // FIX: Use callback with timeout to prevent hanging
+      const blobPromise = new Promise((resolve) => {
+        const timeout = setTimeout(() => {
+          console.warn("toBlob timeout");
+          frameProcessingRef.current = false;
+          resolve(null);
+        }, 2000);
+
+        canvasRef.current.toBlob((blob) => {
+          clearTimeout(timeout);
+          resolve(blob);
+        }, "image/jpeg", 0.7);
+      });
+
+      const blob = await blobPromise;
+      if (!blob) return;
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const frameB64 = e.target.result;
+        try {
+          const res = await fetch(`${API_BASE_URL}/recognition/process-frame`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ frame: frameB64 }),
+          });
+          const data = await res.json();
+          if (data.status === "success") {
+            const { current_symbol, word, sentence } = data.data;
+            updateAppState({
+              currentSymbol: current_symbol || "—",
+              currentWord: word || "",
+              currentSentence: sentence || "",
+              error: "",
             });
-            const data = await res.json();
-            if (data.status === "success") {
-              const { current_symbol, word, sentence } = data.data;
-              updateAppState({
-                currentSymbol: current_symbol || "—",
-                currentWord: word || "",
-                currentSentence: sentence || "",
-                error: "",
-              });
-              retryCountRef.current = 0;
-              setConnectionStatus("connected");
-            }
-          } catch (err) {
-            handleError(err);
+            retryCountRef.current = 0;
+            setConnectionStatus("connected");
           }
-        };
-        reader.readAsDataURL(blob);
-      }, "image/jpeg", 0.7);
+        } catch (err) {
+          handleError(err);
+        } finally {
+          frameProcessingRef.current = false;
+        }
+      };
+      reader.onerror = () => {
+        frameProcessingRef.current = false;
+        console.error("FileReader error");
+      };
+      reader.readAsDataURL(blob);
     } catch (err) {
       console.error("Error sending frame:", err);
+      frameProcessingRef.current = false;
     }
   }, [appState.cameraActive, updateAppState]);
 
@@ -236,20 +261,21 @@ export default function TranslatorPage() {
     }
   }, [updateAppState]);
 
-  // ── Polling for browser frames ──
+  // ── Frame polling ──
   useEffect(() => {
     if (!appState.cameraActive) return;
     const frameInterval = setInterval(sendFrameToBackend, 150);
+    frameIntervalRef.current = frameInterval;
     return () => {
       clearInterval(frameInterval);
+      frameIntervalRef.current = null;
     };
   }, [appState.cameraActive, sendFrameToBackend]);
 
-  // ── Camera controls (browser-based) ──
+  // ── Camera controls ──
   const startCamera = useCallback(async (retryCount = 0) => {
     const MAX_RETRIES = 3;
 
-    // FIX: prevent double-click spam
     if (cameraLoading) return;
     setCameraLoading(true);
 
@@ -268,14 +294,13 @@ export default function TranslatorPage() {
         updateAppState({ cameraActive: true, error: "" });
         setConnectionStatus("connected");
         retryCountRef.current = 0;
-        setCameraLoading(false);
       }
+      setCameraLoading(false);
     } catch (e) {
       console.error("Camera error:", e);
       if (retryCount < MAX_RETRIES) {
         const delay = 1000 * (retryCount + 1);
         updateAppState({ error: `Camera access denied, retrying in ${delay / 1000}s...` });
-        setCameraLoading(false);
         setTimeout(() => startCamera(retryCount + 1), delay);
       } else {
         updateAppState({ error: `Camera access denied: ${e.message}. Check browser permissions.` });
@@ -365,22 +390,20 @@ export default function TranslatorPage() {
   }, [manualEdits.localSentence, appState.currentSentence, updateAppState]);
 
   const clearAll = useCallback(async () => {
-    // Reset local state immediately — don't wait for the API
     setManualEdits({ localWord: "", localSentence: "" });
     updateAppState({
       currentWord: "",
       currentSentence: "",
       currentSymbol: "—",
       suggestions: [],
-      error: "",           
-      cameraFrame: null,   
+      error: "",
+      cameraFrame: null,
     });
 
-    // Then try to clear backend state
     try {
       await fetch(`${API_BASE_URL}/recognition/clear`, { method: "POST" });
     } catch (e) {
-      console.error("Reset failed on backend:", e); 
+      console.error("Reset failed on backend:", e);
     }
   }, [updateAppState]);
 
@@ -522,7 +545,6 @@ export default function TranslatorPage() {
   const displaySentence = manualEdits.localSentence !== "" ? manualEdits.localSentence : appState.currentSentence;
   const canCommitWord = (manualEdits.localWord || appState.currentWord).trim().length > 0;
 
-  // FIX: camera button label reflects exact state
   const cameraButtonLabel = () => {
     if (cameraLoading) return "⏳ Starting...";
     if (appState.cameraActive) return "⏹ Stop";
@@ -577,7 +599,6 @@ export default function TranslatorPage() {
             )}
           </div>
 
-          {/* Hidden canvas for frame capture */}
           <canvas ref={canvasRef} style={{ display: "none" }} width={640} height={480} />
 
           <div className="cam-controls">
@@ -586,7 +607,6 @@ export default function TranslatorPage() {
               className={`ctrl-btn ${appState.cameraActive ? "danger" : "primary"}`}
               onClick={appState.cameraActive ? stopCamera : () => startCamera(0)}
               style={{ marginLeft: "auto" }}
-              // FIX: disable button while loading or backend not ready
               disabled={cameraLoading || !backendReady}
             >
               {cameraButtonLabel()}
