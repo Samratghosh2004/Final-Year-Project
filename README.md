@@ -4,7 +4,7 @@
 
 This project is deployed and available online.
 
-🔗 Live Website: https://6a131547ef366feff3f7d55b--lighthearted-fenglisu-cabc8a.netlify.app/
+🔗 Live Website: https://ishnabridge.netlify.app/
 
 ## How to Run
 
