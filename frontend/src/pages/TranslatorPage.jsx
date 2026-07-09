@@ -85,6 +85,7 @@ export default function TranslatorPage() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const captureIntervalRef = useRef(null);
+  const sendingFrameRef = useRef(false); // guards against overlapping requests piling up on a slow backend
 
   const chatEndRef = useRef(null);
   const retryCountRef = useRef(0);
@@ -117,6 +118,12 @@ export default function TranslatorPage() {
 
   // ── Camera controls (browser webcam via getUserMedia) ──
   const captureAndSendFrame = useCallback(async () => {
+    // FIX: if the previous frame request is still in flight (backend is slow
+    // on Render's free tier), skip this tick instead of firing another
+    // request on top of it — this is what was causing requests to pile up
+    // and eventually time out, showing "Backend unreachable."
+    if (sendingFrameRef.current) return;
+
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -127,6 +134,7 @@ export default function TranslatorPage() {
     canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
     const frameData = canvas.toDataURL("image/jpeg", 0.7);
 
+    sendingFrameRef.current = true;
     try {
       const res = await fetch(`${API_BASE_URL}/recognition/process-frame`, {
         method: "POST",
@@ -146,6 +154,8 @@ export default function TranslatorPage() {
       }
     } catch (err) {
       handleError(err);
+    } finally {
+      sendingFrameRef.current = false;
     }
   }, [updateAppState, handleError]);
 
@@ -169,7 +179,10 @@ export default function TranslatorPage() {
       setConnectionStatus("connected");
       setCameraLoading(false);
 
-      captureIntervalRef.current = setInterval(captureAndSendFrame, 200);
+      // FIX: slowed from 200ms — Render's free tier (0.1 CPU) can't run
+      // TensorFlow inference that fast; sending frames faster than the
+      // backend can process them is what caused "Backend unreachable."
+      captureIntervalRef.current = setInterval(captureAndSendFrame, 800);
     } catch (e) {
       console.error("getUserMedia error:", e);
       let msg = "Could not access camera.";
@@ -198,7 +211,7 @@ export default function TranslatorPage() {
   useEffect(() => {
     let cancelled = false;
     let attempts = 0;
-    const MAX_ATTEMPTS = 60; 
+    const MAX_ATTEMPTS = 20; // 20 x 500ms = 10 seconds max wait
 
     const checkHealth = async () => {
       try {
@@ -230,7 +243,7 @@ export default function TranslatorPage() {
     };
 
     checkHealth();
-    healthCheckRef.current = setInterval(checkHealth, 1000);
+    healthCheckRef.current = setInterval(checkHealth, 500);
 
     return () => {
       cancelled = true;
