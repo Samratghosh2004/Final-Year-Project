@@ -105,7 +105,8 @@ export default function TranslatorPage() {
     setAppState(prev => ({ ...prev, ...updates }));
   }, []);
 
-  const handleError = useCallback((err) => {
+const handleError = useCallback((err) => {
+    console.error("Frame request failed:", err); // ADD THIS
     retryCountRef.current += 1;
     if (retryCountRef.current <= maxRetriesRef.current) {
       setConnectionStatus("reconnecting");
