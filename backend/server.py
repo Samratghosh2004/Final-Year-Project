@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, make_response
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv
@@ -18,49 +18,13 @@ from collections import deque
 from wordfreq import top_n_list
 
 app = Flask(__name__)
-
-# Allowed origins for your frontend(s). Keep this list tight in production.
-ALLOWED_ORIGINS = [
-    "https://ishnabridge.netlify.app",
-    "https://final-year-project-vti4.onrender.com",
-    "http://localhost:5173",
-    "http://localhost:3000",
-]
-
-# Configure CORS for API endpoints
-app.config['CORS_HEADERS'] = 'Content-Type'
-CORS(
-    app,
-    resources={r"/api/*": {"origins": ALLOWED_ORIGINS}},
-    supports_credentials=True,
-    methods=["GET", "HEAD", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
-)
+CORS(app, origins=["https://ishnabridge.netlify.app"])
 
 load_dotenv()
 
 BACKEND_HOST = os.getenv('BACKEND_HOST', '0.0.0.0')
 BACKEND_PORT = int(os.getenv('BACKEND_PORT', 5000))
 DEBUG = os.getenv('DEBUG', 'False').lower() in ('1', 'true', 'yes')
-
-# ── OPTIONS preflight fallback handler ────────────────────────────────────────
-# This ensures that if any preflight somehow doesn't get handled by flask-cors
-# (proxy / deployment edge cases), the server still responds with the required
-# Access-Control-Allow-* headers and a 200 so the browser can continue.
-@app.before_request
-def handle_options_preflight():
-    if request.method == "OPTIONS":
-        resp = make_response("", 200)
-        origin = request.headers.get("Origin", "*")
-        # Return the incoming Origin so the browser accepts it. In production you
-        # can restrict this to ALLOWED_ORIGINS only.
-        resp.headers["Access-Control-Allow-Origin"] = origin
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, HEAD"
-        resp.headers["Access-Control-Allow-Headers"] = request.headers.get(
-            "Access-Control-Request-Headers", "Content-Type"
-        )
-        resp.headers["Access-Control-Allow-Credentials"] = "true"
-        return resp
 
 # ── Word frequency list ────────────────────────────────────────────────────────
 COMMON_WORDS = top_n_list("en", 50000)
@@ -144,7 +108,14 @@ class GestureRecognitionService:
             print(f"✗ Error loading models: {e}")
             raise
 
+    # ────────────────────────────────────────────────────────────────────
     # Legacy server-side webcam methods.
+    # NOTE: these only work on a machine with a physical camera attached
+    # (i.e. running locally). On a cloud host like Render there is no
+    # camera device, so start_camera() will always return an error there.
+    # Kept here for local/dev use; the deployed frontend now uses
+    # process_frame_data() below instead, fed by the browser's own webcam.
+    # ────────────────────────────────────────────────────────────────────
     def start_camera(self):
         if self.is_running:
             return {"status": "warning", "message": "Camera already running"}
@@ -244,6 +215,10 @@ class GestureRecognitionService:
                 self.processed_frame.copy() if self.processed_frame is not None else None,
             )
 
+    # ────────────────────────────────────────────────────────────────────
+    # Shared ROI + skin-detection pipeline used by both the legacy
+    # server-side capture loop and the new browser-frame endpoint.
+    # ────────────────────────────────────────────────────────────────────
     def _process_roi(self, roi):
         ycrcb = cv2.cvtColor(roi, cv2.COLOR_BGR2YCrCb)
         skin_mask = cv2.inRange(
@@ -269,6 +244,15 @@ class GestureRecognitionService:
         return processed
 
     def process_frame_data(self, frame_b64):
+        """
+        NEW: Decode a base64 JPEG sent from the browser's own webcam
+        (via getUserMedia + canvas on the frontend), run it through the
+        same ROI + skin-detection + thresholding pipeline the old
+        cv2.VideoCapture loop used, then predict on it.
+
+        This is what makes gesture recognition work when the backend is
+        deployed to a cloud host (Render, etc.) with no physical camera.
+        """
         try:
             if "," in frame_b64:
                 frame_b64 = frame_b64.split(",", 1)[1]
@@ -280,6 +264,9 @@ class GestureRecognitionService:
             if frame is None:
                 return {"status": "error", "message": "Could not decode frame"}
 
+            # NOTE: frame from the browser is already mirrored by CSS
+            # (see the video element's transform on the frontend), so we
+            # do NOT flip again here — flipping twice would un-mirror it.
             x1 = int(0.5 * frame.shape[1])
             y1 = 10
             x2 = frame.shape[1] - 10
@@ -461,6 +448,9 @@ def process_frame():
 
 
 # ── Legacy server-side webcam routes ──
+# These only succeed on a machine with a physical camera attached
+# (local development). Left in place for local testing; the deployed
+# frontend no longer calls these.
 @app.route('/api/camera/start', methods=['POST'])
 def start_camera():
     result = service.start_camera()
