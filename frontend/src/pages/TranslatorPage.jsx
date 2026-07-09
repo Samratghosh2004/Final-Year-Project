@@ -83,6 +83,9 @@ export default function TranslatorPage() {
     localSentence: "",
   });
 
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
   const frameIntervalRef = useRef(null);
   const recIntervalRef = useRef(null);
   const chatEndRef = useRef(null);
@@ -173,41 +176,52 @@ export default function TranslatorPage() {
     fetchSuggestions();
   }, [debouncedActiveWord, updateAppState]);
 
-  // ── Fetch recognition state ──
-  const fetchRecognitionData = useCallback(async () => {
-    if (!appState.cameraActive) return;
+  // ── Send browser frame to backend for processing ──
+  const sendFrameToBackend = useCallback(async () => {
+    if (!videoRef.current || !canvasRef.current || !appState.cameraActive) return;
+    
     try {
-      const response = await fetch(`${API_BASE_URL}/recognition/state`);
-      const data = await response.json();
-      if (data.status === "success") {
-        const { current_symbol, word, sentence } = data.data;
-        updateAppState({
-          currentSymbol: current_symbol || "—",
-          currentWord: word || "",
-          currentSentence: sentence || "",
-          error: "",
-          cameraFrame: data.frame
-            ? `data:image/jpeg;base64,${data.frame}`
-            : appState.cameraFrame,
-        });
-        retryCountRef.current = 0;
-        setConnectionStatus("connected");
-      }
-    } catch (err) {
-      handleError(err);
-    }
-  }, [appState.cameraActive, appState.cameraFrame, updateAppState]);
+      const ctx = canvasRef.current.getContext("2d");
+      if (!ctx) return;
 
-  const fetchFrameOnly = useCallback(async () => {
-    if (!appState.cameraActive) return;
-    try {
-      const response = await fetch(`${API_BASE_URL}/camera/frame`);
-      const data = await response.json();
-      if (data.status === "success") {
-        updateAppState({ cameraFrame: `data:image/jpeg;base64,${data.frame}`, error: "" });
-      }
-    } catch (e) {
-      console.error("Frame fetch error:", e);
+      // Draw video to canvas (mirrored for selfie view)
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(videoRef.current, -canvasRef.current.width, 0, canvasRef.current.width, canvasRef.current.height);
+      ctx.restore();
+
+      // Convert to base64 JPEG
+      canvasRef.current.toBlob((blob) => {
+        if (!blob) return;
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const frameB64 = e.target.result;
+          try {
+            const res = await fetch(`${API_BASE_URL}/recognition/process-frame`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ frame: frameB64 }),
+            });
+            const data = await res.json();
+            if (data.status === "success") {
+              const { current_symbol, word, sentence } = data.data;
+              updateAppState({
+                currentSymbol: current_symbol || "—",
+                currentWord: word || "",
+                currentSentence: sentence || "",
+                error: "",
+              });
+              retryCountRef.current = 0;
+              setConnectionStatus("connected");
+            }
+          } catch (err) {
+            handleError(err);
+          }
+        };
+        reader.readAsDataURL(blob);
+      }, "image/jpeg", 0.7);
+    } catch (err) {
+      console.error("Error sending frame:", err);
     }
   }, [appState.cameraActive, updateAppState]);
 
@@ -222,19 +236,16 @@ export default function TranslatorPage() {
     }
   }, [updateAppState]);
 
-  // ── Polling ──
+  // ── Polling for browser frames ──
   useEffect(() => {
     if (!appState.cameraActive) return;
-    const stateInterval = setInterval(fetchRecognitionData, 150);
-    const frameInterval = setInterval(fetchFrameOnly, 200);
+    const frameInterval = setInterval(sendFrameToBackend, 150);
     return () => {
-      clearInterval(stateInterval);
       clearInterval(frameInterval);
     };
-  }, [appState.cameraActive, fetchRecognitionData, fetchFrameOnly]);
+  }, [appState.cameraActive, sendFrameToBackend]);
 
-  // ── Camera controls ──
-  // FIX: startCamera now has retry logic with exponential backoff
+  // ── Camera controls (browser-based) ──
   const startCamera = useCallback(async (retryCount = 0) => {
     const MAX_RETRIES = 3;
 
@@ -243,49 +254,44 @@ export default function TranslatorPage() {
     setCameraLoading(true);
 
     try {
-      const r = await fetch(`${API_BASE_URL}/camera/start`, { method: "POST" });
-      const d = await r.json();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: "user"
+        }
+      });
 
-      if (d.status === "success") {
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        streamRef.current = stream;
         updateAppState({ cameraActive: true, error: "" });
         setConnectionStatus("connected");
         retryCountRef.current = 0;
         setCameraLoading(false);
-
-      } else if (d.status === "warning") {
-        // Already running — just mark as active
-        updateAppState({ cameraActive: true, error: "" });
-        setCameraLoading(false);
-
-      } else {
-        // Error — retry with backoff
-        if (retryCount < MAX_RETRIES) {
-          const delay = 1000 * (retryCount + 1); // 1s, 2s, 3s
-          updateAppState({ error: `Camera failed, retrying in ${delay / 1000}s...` });
-          setCameraLoading(false);
-          setTimeout(() => startCamera(retryCount + 1), delay);
-        } else {
-          updateAppState({ error: `Camera failed: ${d.message}` });
-          setCameraLoading(false);
-        }
       }
     } catch (e) {
+      console.error("Camera error:", e);
       if (retryCount < MAX_RETRIES) {
         const delay = 1000 * (retryCount + 1);
-        updateAppState({ error: `Cannot reach backend, retrying in ${delay / 1000}s...` });
+        updateAppState({ error: `Camera access denied, retrying in ${delay / 1000}s...` });
         setCameraLoading(false);
         setTimeout(() => startCamera(retryCount + 1), delay);
       } else {
-        updateAppState({ error: "Failed to start camera: " + e.message });
+        updateAppState({ error: `Camera access denied: ${e.message}. Check browser permissions.` });
         setCameraLoading(false);
       }
     }
   }, [cameraLoading, updateAppState]);
 
   const stopCamera = useCallback(async () => {
-    try {
-      await fetch(`${API_BASE_URL}/camera/stop`, { method: "POST" });
-    } catch { }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     updateAppState({ cameraActive: false, cameraFrame: null });
     setCameraLoading(false);
   }, [updateAppState]);
@@ -531,22 +537,31 @@ export default function TranslatorPage() {
         {/* ── Column 1: Camera ── */}
         <div className="cam-col">
           <div className="cam-feed-wrap">
-            {appState.cameraFrame
-              ? <img src={appState.cameraFrame} alt="Camera feed" />
-              : (
-                <div className="cam-grid-placeholder">
-                  <span>📷</span>
-                  <p>
-                    {cameraLoading
-                      ? "Starting camera…"
-                      : !backendReady
-                        ? "Loading models, please wait…"
-                        : appState.cameraActive
-                          ? "Connecting to camera…"
-                          : "Camera inactive"}
-                  </p>
-                </div>
-              )}
+            {appState.cameraActive ? (
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  transform: "scaleX(-1)",
+                }}
+              />
+            ) : (
+              <div className="cam-grid-placeholder">
+                <span>📷</span>
+                <p>
+                  {cameraLoading
+                    ? "Starting camera…"
+                    : !backendReady
+                      ? "Loading models, please wait…"
+                      : "Camera inactive"}
+                </p>
+              </div>
+            )}
 
             {appState.cameraActive && (
               <>
@@ -561,6 +576,9 @@ export default function TranslatorPage() {
               </>
             )}
           </div>
+
+          {/* Hidden canvas for frame capture */}
+          <canvas ref={canvasRef} style={{ display: "none" }} width={640} height={480} />
 
           <div className="cam-controls">
             <button className="ctrl-btn danger" onClick={clearAll}>↺ Reset</button>
